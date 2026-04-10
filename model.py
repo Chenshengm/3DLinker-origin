@@ -49,12 +49,14 @@ class ChemModel(torch.nn.Module):
         self.params['num_symbols'] = len(dataset_info(dataset)['atom_types'])
 
         self.run_id = "_".join([time.strftime("%Y-%m-%d-%H-%M-%S"), str(os.getpid())])
-        log_dir = args.get('--log_dir') or '.'
-        self.log_file = os.path.join(log_dir, "%s_log_%s.json" % (self.run_id, dataset))
-        self.best_model_file = os.path.join(log_dir, "%s_model.pickle" % self.run_id)
+        log_dir = self.params.get('log_dir') or args.get('--log_dir') or '.'
+        self.log_dir = os.path.join(log_dir, f"{dataset}_{self.run_id}")
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.log_file = os.path.join(self.log_dir, "%s_log_%s.json" % (self.run_id, dataset))
+        self.best_model_file = os.path.join(self.log_dir, "%s_model.pickle" % self.run_id)
 
         if self.params['save_params_file']:
-            with open(os.path.join(log_dir, "%s_params_%s.json" % (self.run_id, dataset)), "w") as f:
+            with open(os.path.join(self.log_dir, "%s_params_%s.json" % (self.run_id, dataset)), "w") as f:
                 json.dump(params, f)
         print("Run %s starting with following parameters:\n%s" % (self.run_id, json.dumps(self.params)))
 
@@ -242,8 +244,7 @@ class ChemModel(torch.nn.Module):
         plt.show()
 
     def save_model(self):
-        log_dir = self.args.get('--log_dir') or '.'
-        path = os.path.join(log_dir, "%s_model_%s.pickle" % (self.run_id, self.params['dataset']))
+        path = os.path.join(self.log_dir, "%s_model_%s.pickle" % (self.run_id, self.params['dataset']))
         weights_to_save = {}
         for var in self.weights.keys():
             weights_to_save[var] = self.weights[var]
@@ -321,4 +322,3 @@ class ChemModel(torch.nn.Module):
 
     def generate_new_graphs(self, data):
         raise Exception("Models have to implement generate_new_graphs!")
-

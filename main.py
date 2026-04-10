@@ -98,6 +98,8 @@ class Linker(ChemModel):
             'check_overlap_edge': False,
             "truncate_distance": 10,
             "output_name": '',
+            "pkl_file": "",
+            "log_dir": ".",
             "check_point_path": 'check_points',
             'if_save_check_point': True,
             'save_params_file': False,
@@ -1699,7 +1701,7 @@ class Linker(ChemModel):
         best_mol = select_best(all_mol)
         # Nothing generated
         if best_mol is None:
-            return list(exit_points)
+            return list(exit_points), None
         # Record generated molecule
         generated_all_smiles.append(elements['smiles_in'] + " " + elements['smiles_out'] +
                                     " " + Chem.CanonSmiles(Chem.MolToSmiles(best_mol)))
@@ -1709,7 +1711,7 @@ class Linker(ChemModel):
         if count % 100 == 0:
             print('Generated mols %d' % count)
 
-        return list(exit_points)
+        return list(exit_points), best_mol
 
 
     def generate_new_graphs(self, data):
@@ -1718,6 +1720,10 @@ class Linker(ChemModel):
         # all generated smiles
         generated_all_smiles = []
         generated_all_mols = []
+        pkl_data = []
+        if self.params.get('pkl_file'):
+            with open(self.params['pkl_file'], 'rb') as f:
+                pkl_data = pickle.load(f)
         # counter
         count = 0
         correct_exit = []
@@ -1730,6 +1736,12 @@ class Linker(ChemModel):
             # batch data
             elements_batch = bucketed[bucket][start_idx:end_idx]
             for elements in elements_batch:
+                raw_data = {}
+                if pkl_data and elements.get('extra_idx') is not None:
+                    raw_data = pkl_data[elements['extra_idx']]
+                case_id = raw_data.get('index', count) if isinstance(raw_data, dict) else count
+                save_path = os.path.join(self.log_dir, f"sampling_{case_id:06d}.pkl")
+                gen_list = []
                 # Allow control over number of additional atoms during generation
                 maximum_length = self.compensate_node_length(elements, bucket_sizes[bucket])
                 # Generate multiple outputs per mol in valid/test set
@@ -1742,11 +1754,33 @@ class Linker(ChemModel):
                     random_normal_states_v = torch.normal(0, 1, [1, maximum_length, self.params['encoding_vec_size'], 3])
                     random_normal_states_in_v = torch.normal(0, 1, [1, maximum_length, self.params['encoding_vec_size'], 3])
                     with torch.no_grad():
-                        sampled_exit = self.generate_graph_with_state(random_normal_states_h, random_normal_states_in_h,
-                                                   random_normal_states_v, random_normal_states_in_v,
-                                            maximum_length, generated_all_smiles, generated_all_mols, elements, count,
-                                                       correct_exit)
+                        sampled_exit, gen_mol = self.generate_graph_with_state(
+                            random_normal_states_h, random_normal_states_in_h,
+                            random_normal_states_v, random_normal_states_in_v,
+                            maximum_length, generated_all_smiles, generated_all_mols, elements, count,
+                            correct_exit
+                        )
+                        if gen_mol is not None:
+                            gen_list.append(gen_mol)
                     count += 1
+                def _safe_get(d, k, default=None):
+                    return d.get(k, default) if isinstance(d, dict) else default
+
+                save_dict = {
+                    'ref_smi': _safe_get(raw_data, 'smiles', elements.get('smiles_out') if isinstance(elements, dict) else None),
+                    'frag_smi': _safe_get(raw_data, 'frag_smi', elements.get('smiles_in') if isinstance(elements, dict) else None),
+                    'linker_smi': _safe_get(raw_data, 'linker_smi'),
+                    'ref_mol': _safe_get(raw_data, 'mol'),
+                    'gen_mols': gen_list,
+                    'frag_mols': _safe_get(raw_data, 'frag_mol'),
+                    'linker_mols': _safe_get(raw_data, 'linker_mol'),
+                    'atom_indices_f1': _safe_get(raw_data, 'atom_indices_f1'),
+                    'atom_indices_f2': _safe_get(raw_data, 'atom_indices_f2'),
+                    'fragment_mask': _safe_get(raw_data, 'fragment_mask'),
+                    'linker_mask': _safe_get(raw_data, 'linker_mask'),
+                }
+                with open(save_path, 'wb') as f_save:
+                    pickle.dump(save_dict, f_save)
                 sampled_exits.append(sampled_exit)
             bucket_counters[bucket] += 1
         # Terminate when loop finished
