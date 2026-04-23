@@ -35,10 +35,19 @@ def read_file(file_path):
     data = []
     for i, line in enumerate(lines):
         toks = line.strip().split()
+        smi_mol, smi_linker, smi_frags = None, None, None
         if len(toks) == 3:
             smi_frags, abs_dist, angle = toks
+            frag_mol = Chem.MolFromSmiles(smi_frags)
+            if frag_mol is None:
+                print('\nSkipping invalid fragment SMILES at line %d: %s' % (i + 1, smi_frags))
+                continue
+            smi_frags = Chem.MolToSmiles(frag_mol)
             # For sampling-only inputs without ground truth, construct pseudo molecule/linker
             smi_mol = utils.construct_fake_gt(smi_frags)
+            if Chem.MolFromSmiles(smi_mol) is None:
+                print('\nSkipping line %d because pseudo molecule construction failed: %s' % (i + 1, smi_frags))
+                continue
             du = Chem.MolFromSmiles('*')
             clean_frag = Chem.RemoveHs(
                 AllChem.ReplaceSubstructs(
@@ -51,6 +60,9 @@ def read_file(file_path):
                 smi_linker = '*'
         elif len(toks) == 5:
             smi_mol, smi_linker, smi_frags, abs_dist, angle = toks
+            if Chem.MolFromSmiles(smi_mol) is None or Chem.MolFromSmiles(smi_frags) is None:
+                print('\nSkipping invalid 5-column input at line %d' % (i + 1))
+                continue
         else:
             print("Incorrect input format. Please check the README for useage.")
             exit()
