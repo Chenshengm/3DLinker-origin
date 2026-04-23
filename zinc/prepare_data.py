@@ -14,13 +14,16 @@ import sys, os
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from docopt import docopt
 from rdkit import Chem
+from rdkit.Chem import AllChem
 from rdkit.Chem import rdmolops
 from rdkit.Chem import rdFMCS
 import json
 import numpy as np
+import re
 from utils import bond_dict, dataset_info, need_kekulize, to_graph_mol, graph_to_adj_mat, compute_3d_coors, \
     compute_3d_coors_multiple, compute_3d_coors_frags
 import utils
+import analysis.frag_utils as frag_utils
 from align_utils import align_mol_to_frags
 
 dataset = 'zinc'
@@ -31,11 +34,21 @@ def read_file(file_path):
     num_lines = len(lines)
     data = []
     for i, line in enumerate(lines):
-        toks = line.strip().split(' ')
+        toks = line.strip().split()
         if len(toks) == 3:
             smi_frags, abs_dist, angle = toks
-            smi_mol = smi_frags
-            smi_linker = ''
+            # For sampling-only inputs without ground truth, construct pseudo molecule/linker
+            smi_mol = utils.construct_fake_gt(smi_frags)
+            du = Chem.MolFromSmiles('*')
+            clean_frag = Chem.RemoveHs(
+                AllChem.ReplaceSubstructs(
+                    Chem.MolFromSmiles(smi_frags), du, Chem.MolFromSmiles('[H]'), True
+                )[0]
+            )
+            smi_linker = frag_utils.get_linker(Chem.MolFromSmiles(smi_mol), clean_frag, smi_frags)
+            smi_linker = re.sub('[0-9]+\\*', '*', smi_linker)
+            if smi_linker == '':
+                smi_linker = '*'
         elif len(toks) == 5:
             smi_mol, smi_linker, smi_frags, abs_dist, angle = toks
         else:
